@@ -1,4 +1,3 @@
-
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import pyautogui
@@ -9,8 +8,16 @@ import json
 import pystray
 from pystray import MenuItem as item
 from PIL import Image, ImageTk
-import sys
 import os
+import sys
+
+# Path fixer for PyInstaller
+def resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
 actions = []
 recording = False
@@ -24,6 +31,9 @@ play_hotkey = 'f9'
 progress = None
 progress_var = None
 icon_images = {}
+status_var = None
+
+# ----------- Recording Functions -----------
 
 def record_actions():
     global recording, actions
@@ -31,14 +41,31 @@ def record_actions():
     actions.clear()
     last_time = time.time()
     messagebox.showinfo("Recording", f"Recording started. Press {record_hotkey.upper()} again to stop.")
+
+    def on_event(e):
+        nonlocal last_time
+        if not recording:
+            return
+        delay = time.time() - last_time
+        last_time = time.time()
+        if e.event_type == 'down':
+            actions.append(('keydown', e.name, delay))
+        elif e.event_type == 'up':
+            actions.append(('keyup', e.name, delay))
+
+    keyboard.hook(on_event)
+
     while recording:
         x, y = pyautogui.position()
         delay = time.time() - last_time
         last_time = time.time()
         actions.append(('move', x, y, delay))
-        if pyautogui.mouseDown():
-            actions.append(('click', x, y, delay))
         time.sleep(0.01)
+
+    keyboard.unhook_all()
+    save_file(auto=True)
+
+# ----------- Playback Function -----------
 
 def playback_actions():
     global playing, paused
@@ -48,32 +75,46 @@ def playback_actions():
     playing = True
     total_actions = len(actions) * repeat_count
     completed = 0
+    set_status("Playing...")
     while playing:
         for _ in range(repeat_count):
             for action in actions:
                 while paused:
+                    set_status("Paused...")
                     time.sleep(0.1)
                 if not playing:
                     return
-                act, x, y, delay = action
+                act = action[0]
+                delay = action[-1]
                 time.sleep(delay / speed_multiplier)
                 if act == 'move':
+                    _, x, y, _ = action
                     pyautogui.moveTo(x, y)
                 elif act == 'click':
+                    _, x, y, _ = action
                     pyautogui.click(x, y)
+                elif act == 'keydown':
+                    _, keyname, _ = action
+                    keyboard.press(keyname)
+                elif act == 'keyup':
+                    _, keyname, _ = action
+                    keyboard.release(keyname)
                 completed += 1
                 update_progress(int((completed / total_actions) * 100))
-        if not continuous:
-            break
+            if not continuous:
+                break
     playing = False
     update_progress(100)
+    set_status("Idle")
+
+# ----------- GUI Functions -----------
 
 def start_recording(): threading.Thread(target=record_actions).start()
-def stop_recording():  global recording; recording = False
+def stop_recording(): global recording; recording = False; set_status("Idle")
 def start_playback(): threading.Thread(target=playback_actions).start()
-def stop_playback(): global playing; playing = False
+def stop_playback(): global playing; playing = False; set_status("Stopped")
 def pause_playback(): global paused; paused = True
-def resume_playback(): global paused; paused = False
+def resume_playback(): global paused; paused = False; set_status("Resumed")
 def set_speed(multiplier): global speed_multiplier; speed_multiplier = multiplier
 
 def set_repeat():
@@ -89,8 +130,8 @@ def toggle_continuous():
     continuous = not continuous
     messagebox.showinfo("Loop", f"Loop is now {'ON' if continuous else 'OFF'}")
 
-def save_file():
-    file_path = filedialog.asksaveasfilename(defaultextension=".rec", filetypes=[("TinyTask File", "*.rec")])
+def save_file(auto=False):
+    file_path = "last_macro.rec" if auto else filedialog.asksaveasfilename(defaultextension=".rec", filetypes=[("TinyTask File", "*.rec")])
     if file_path:
         with open(file_path, 'w') as f:
             json.dump(actions, f)
@@ -101,6 +142,23 @@ def open_file():
     if file_path:
         with open(file_path, 'r') as f:
             actions = json.load(f)
+
+def load_last():
+    global actions
+    if os.path.exists("last_macro.rec"):
+        with open("last_macro.rec", 'r') as f:
+            actions = json.load(f)
+
+def set_hotkeys():
+    global record_hotkey, play_hotkey
+    new_rec = simple_input("Set Record Hotkey", f"Current: {record_hotkey}. Enter new key:")
+    new_play = simple_input("Set Play Hotkey", f"Current: {play_hotkey}. Enter new key:")
+    if new_rec:
+        record_hotkey = new_rec
+    if new_play:
+        play_hotkey = new_play
+    register_hotkeys()
+    messagebox.showinfo("Hotkeys", f"New Hotkeys Set:\nRecord = {record_hotkey.upper()}\nPlay = {play_hotkey.upper()}")
 
 def simple_input(title, prompt):
     input_win = tk.Toplevel(root)
@@ -116,9 +174,16 @@ def simple_input(title, prompt):
     return val.get()
 
 def update_progress(val):
-    if progress_var: progress_var.set(val); root.update_idletasks()
+    if progress_var:
+        progress_var.set(val)
+    root.update_idletasks()
+
+def set_status(text):
+    if status_var:
+        status_var.set(f"Status: {text}")
 
 def register_hotkeys():
+    keyboard.unhook_all_hotkeys()
     keyboard.add_hotkey(record_hotkey, lambda: threading.Thread(target=start_recording).start())
     keyboard.add_hotkey(play_hotkey, lambda: threading.Thread(target=start_playback).start())
 
@@ -130,15 +195,17 @@ def create_tray():
     threading.Thread(target=tray_icon.run).start()
 
 def load_icon(name):
-    path = os.path.join("icons", name)
+    path = resource_path(os.path.join("icons", name))
     img = Image.open(path).resize((24, 24))
     photo = ImageTk.PhotoImage(img)
     icon_images[name] = photo
     return photo
 
+# ----------- GUI Layout -----------
+
 root = tk.Tk()
-root.title("TinyTask Python Clone")
-root.iconbitmap("icon.ico")
+root.title("TinyTask PRO Clone")
+root.iconbitmap(resource_path("icon.ico"))
 root.configure(bg="white")
 frame = tk.Frame(root, bg="white", bd=2, relief="ridge")
 frame.pack(padx=10, pady=10)
@@ -146,14 +213,22 @@ toolbar = tk.Frame(frame, bg="white")
 toolbar.pack(pady=10)
 
 btns = [
-    ("Open", open_file, "open.png"), ("Save", save_file, "save.png"),
-    ("Rec", start_recording, "rec.png"), ("Stop Rec", stop_recording, "stoprec.png"),
-    ("Play", start_playback, "play.png"), ("Stop", stop_playback, "stop.png"),
-    ("Pause", pause_playback, "pause.png"), ("Resume", resume_playback, "resume.png"),
-    ("x0.5", lambda: set_speed(0.5), "half.png"), ("x1", lambda: set_speed(1.0), "one.png"),
-    ("x2", lambda: set_speed(2.0), "two.png"), ("x8", lambda: set_speed(8.0), "eight.png"),
-    ("x100", lambda: set_speed(100.0), "hundred.png"), ("Repeat", set_repeat, "repeat.png"),
-    ("Loop", toggle_continuous, "loop.png")
+    ("Open", open_file, "open.png"),
+    ("Save", lambda: save_file(False), "save.png"),
+    ("Rec", start_recording, "rec.png"),
+    ("Stop Rec", stop_recording, "stoprec.png"),
+    ("Play", start_playback, "play.png"),
+    ("Stop", stop_playback, "stop.png"),
+    ("Pause", pause_playback, "pause.png"),
+    ("Resume", resume_playback, "resume.png"),
+    ("x0.5", lambda: set_speed(0.5), "half.png"),
+    ("x1", lambda: set_speed(1.0), "one.png"),
+    ("x2", lambda: set_speed(2.0), "two.png"),
+    ("x8", lambda: set_speed(8.0), "eight.png"),
+    ("x100", lambda: set_speed(100.0), "hundred.png"),
+    ("Repeat", set_repeat, "repeat.png"),
+    ("Loop", toggle_continuous, "loop.png"),
+    ("Hotkeys", set_hotkeys, "save.png")
 ]
 
 for label, command, icon_file in btns:
@@ -166,7 +241,12 @@ for label, command, icon_file in btns:
 progress_var = tk.IntVar()
 progress = ttk.Progressbar(frame, variable=progress_var, maximum=100, length=1150)
 progress.pack(pady=5)
-root.geometry("1220x180")
+
+status_var = tk.StringVar(value="Status: Idle")
+tk.Label(root, textvariable=status_var, bg="white", fg="blue").pack()
+
+root.geometry("1220x210")
 register_hotkeys()
 create_tray()
+load_last()
 root.mainloop()
