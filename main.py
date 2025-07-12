@@ -11,7 +11,7 @@ from PIL import Image, ImageTk
 import os
 import sys
 
-# PyInstaller path fix
+# --- Helper for PyInstaller paths ---
 def resource_path(relative_path):
     try:
         base_path = sys._MEIPASS
@@ -19,6 +19,7 @@ def resource_path(relative_path):
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
 
+# --- Global Vars ---
 actions = []
 recording = False
 playing = False
@@ -32,10 +33,9 @@ progress = None
 progress_var = None
 icon_images = {}
 status_var = None
-
-# ✅ Hotkey handlers
 hotkey_handlers = []
 
+# --- Recording ---
 def record_actions():
     global recording, actions
     recording = True
@@ -66,6 +66,7 @@ def record_actions():
     keyboard.unhook_all()
     save_file(auto=True)
 
+# --- Playback ---
 def playback_actions():
     global playing, paused
     if not actions:
@@ -85,10 +86,9 @@ def playback_actions():
                     return
                 act = action[0]
                 delay = action[-1]
-                time.sleep(delay / speed_multiplier)
                 if act == 'move':
-                    _, x, y, _ = action
-                    pyautogui.moveTo(x, y)
+                    _, x, y, delay = action
+                    pyautogui.moveTo(x, y, duration=max(delay / speed_multiplier, 0.01))  # Smooth move
                 elif act == 'click':
                     _, x, y, _ = action
                     pyautogui.click(x, y)
@@ -98,14 +98,18 @@ def playback_actions():
                 elif act == 'keyup':
                     _, keyname, _ = action
                     keyboard.release(keyname)
+                else:
+                    pass
                 completed += 1
                 update_progress(int((completed / total_actions) * 100))
+                time.sleep(0.01)
             if not continuous:
                 break
     playing = False
     update_progress(100)
     set_status("Idle")
 
+# --- Controls ---
 def start_recording(): threading.Thread(target=record_actions).start()
 def stop_recording(): global recording; recording = False; set_status("Idle")
 def start_playback(): threading.Thread(target=playback_actions).start()
@@ -181,11 +185,9 @@ def set_status(text):
 
 def register_hotkeys():
     global hotkey_handlers
-    # Clear old hotkeys safely
     for handler in hotkey_handlers:
         keyboard.remove_hotkey(handler)
     hotkey_handlers = []
-    # Register new hotkeys
     h1 = keyboard.add_hotkey(record_hotkey, lambda: threading.Thread(target=start_recording).start())
     h2 = keyboard.add_hotkey(play_hotkey, lambda: threading.Thread(target=start_playback).start())
     hotkey_handlers.extend([h1, h2])
@@ -199,22 +201,22 @@ def create_tray():
 
 def load_icon(name):
     path = resource_path(os.path.join("icons", name))
-    img = Image.open(path).resize((24, 24))
+    img = Image.open(path).resize((48, 48))  # Larger icon for bigger button
     photo = ImageTk.PhotoImage(img)
     icon_images[name] = photo
     return photo
 
+# --- GUI ---
 root = tk.Tk()
 root.title("TinyTask PRO Clone")
-
 root.iconbitmap(default=resource_path("icon.ico"))
-
 root.configure(bg="white")
 frame = tk.Frame(root, bg="white", bd=2, relief="ridge")
 frame.pack(padx=10, pady=10)
 toolbar = tk.Frame(frame, bg="white")
 toolbar.pack(pady=10)
 
+# --- Big Main Buttons ---
 btns = [
     ("Open", open_file, "open.png"),
     ("Save", lambda: save_file(False), "save.png"),
@@ -223,24 +225,31 @@ btns = [
     ("Play", start_playback, "play.png"),
     ("Stop", stop_playback, "stop.png"),
     ("Pause", pause_playback, "pause.png"),
-    ("Resume", resume_playback, "resume.png"),
-    ("x0.5", lambda: set_speed(0.5), "half.png"),
-    ("x1", lambda: set_speed(1.0), "one.png"),
-    ("x2", lambda: set_speed(2.0), "two.png"),
-    ("x8", lambda: set_speed(8.0), "eight.png"),
-    ("x100", lambda: set_speed(100.0), "hundred.png"),
-    ("Repeat", set_repeat, "repeat.png"),
-    ("Loop", toggle_continuous, "loop.png"),
-    ("Hotkeys", set_hotkeys, "save.png")
+    ("Resume", resume_playback, "resume.png")
 ]
 
 for label, command, icon_file in btns:
     try:
         icon = load_icon(icon_file)
-        tk.Button(toolbar, image=icon, command=command, bg="white", relief="flat").pack(side="left", padx=4)
+        tk.Button(toolbar, image=icon, command=command, bg="white", relief="flat", width=64, height=64).pack(side="left", padx=6)
     except:
-        tk.Button(toolbar, text=label, command=command, bg="white").pack(side="left", padx=4)
+        tk.Button(toolbar, text=label, command=command, bg="white", width=8, height=2).pack(side="left", padx=6)
 
+# --- Other Menu ---
+other_menu = tk.Menubutton(toolbar, text="Other", relief="raised", bg="white")
+other_menu.menu = tk.Menu(other_menu, tearoff=0)
+other_menu["menu"] = other_menu.menu
+other_menu.menu.add_command(label="x0.5 Speed", command=lambda: set_speed(0.5))
+other_menu.menu.add_command(label="x1 Speed", command=lambda: set_speed(1.0))
+other_menu.menu.add_command(label="x2 Speed", command=lambda: set_speed(2.0))
+other_menu.menu.add_command(label="x8 Speed", command=lambda: set_speed(8.0))
+other_menu.menu.add_command(label="x100 Speed", command=lambda: set_speed(100.0))
+other_menu.menu.add_command(label="Repeat", command=set_repeat)
+other_menu.menu.add_command(label="Loop", command=toggle_continuous)
+other_menu.menu.add_command(label="Set Hotkeys", command=set_hotkeys)
+other_menu.pack(side="left", padx=6)
+
+# --- Progress ---
 progress_var = tk.IntVar()
 progress = ttk.Progressbar(frame, variable=progress_var, maximum=100, length=1150)
 progress.pack(pady=5)
@@ -248,7 +257,7 @@ progress.pack(pady=5)
 status_var = tk.StringVar(value="Status: Idle")
 tk.Label(root, textvariable=status_var, bg="white", fg="blue").pack()
 
-root.geometry("1220x210")
+root.geometry("1220x240")
 register_hotkeys()
 create_tray()
 load_last()
