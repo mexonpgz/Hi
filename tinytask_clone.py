@@ -11,7 +11,7 @@ from PIL import Image, ImageTk
 import os
 import sys
 
-# 🗂️ Path fix for exe bundle
+# 🔑 PyInstaller path fix
 def resource_path(relative_path):
     try:
         base_path = sys._MEIPASS
@@ -19,7 +19,6 @@ def resource_path(relative_path):
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
 
-# ------------ Variables ------------
 actions = []
 recording = False
 playing = False
@@ -34,7 +33,6 @@ progress_var = None
 icon_images = {}
 status_var = None
 
-# ------------ Recording ------------
 def record_actions():
     global recording, actions
     recording = True
@@ -65,7 +63,6 @@ def record_actions():
     keyboard.unhook_all()
     save_file(auto=True)
 
-# ------------ Playback ------------
 def playback_actions():
     global playing, paused
     if not actions:
@@ -106,7 +103,6 @@ def playback_actions():
     update_progress(100)
     set_status("Idle")
 
-# ------------ Controls ------------
 def start_recording(): threading.Thread(target=record_actions).start()
 def stop_recording(): global recording; recording = False; set_status("Idle")
 def start_playback(): threading.Thread(target=playback_actions).start()
@@ -199,12 +195,11 @@ def load_icon(name):
     icon_images[name] = photo
     return photo
 
-# ------------ GUI ------------
 root = tk.Tk()
 root.title("TinyTask PRO Clone")
 
-# ✅ MAIN FIX — iconbitmap path
-root.iconbitmap(resource_path("icon.ico"))
+# ✅ FIXED — correct syntax
+root.iconbitmap(default=resource_path("icon.ico"))
 
 root.configure(bg="white")
 frame = tk.Frame(root, bg="white", bd=2, relief="ridge")
