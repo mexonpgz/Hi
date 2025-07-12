@@ -11,7 +11,7 @@ from PIL import Image, ImageTk
 import os
 import sys
 
-# 🔑 PyInstaller path fix
+# PyInstaller path fix
 def resource_path(relative_path):
     try:
         base_path = sys._MEIPASS
@@ -32,6 +32,9 @@ progress = None
 progress_var = None
 icon_images = {}
 status_var = None
+
+# ✅ Hotkey handlers
+hotkey_handlers = []
 
 def record_actions():
     global recording, actions
@@ -177,9 +180,15 @@ def set_status(text):
         status_var.set(f"Status: {text}")
 
 def register_hotkeys():
-    keyboard.unhook_all_hotkeys()
-    keyboard.add_hotkey(record_hotkey, lambda: threading.Thread(target=start_recording).start())
-    keyboard.add_hotkey(play_hotkey, lambda: threading.Thread(target=start_playback).start())
+    global hotkey_handlers
+    # Clear old hotkeys safely
+    for handler in hotkey_handlers:
+        keyboard.remove_hotkey(handler)
+    hotkey_handlers = []
+    # Register new hotkeys
+    h1 = keyboard.add_hotkey(record_hotkey, lambda: threading.Thread(target=start_recording).start())
+    h2 = keyboard.add_hotkey(play_hotkey, lambda: threading.Thread(target=start_playback).start())
+    hotkey_handlers.extend([h1, h2])
 
 def create_tray():
     def on_quit(icon, item): icon.stop(); root.quit()
@@ -198,7 +207,6 @@ def load_icon(name):
 root = tk.Tk()
 root.title("TinyTask PRO Clone")
 
-# ✅ FIXED — correct syntax
 root.iconbitmap(default=resource_path("icon.ico"))
 
 root.configure(bg="white")
